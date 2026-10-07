@@ -79,8 +79,9 @@ local function stringOrNil(value)
     return nil
 end
 
--- Feedbin timestamps are UTC ("2013-02-02T14:07:33.000000Z"); os.time reads
--- a table as local time, so shift by the local UTC offset.
+-- Feedbin timestamps are UTC ("2013-02-02T14:07:33.000000Z"). os.time reads
+-- a table as local time and gets daylight saving wrong when shifted back, so
+-- count the days since the epoch directly (Howard Hinnant's days_from_civil).
 local function parseUtcTimestamp(timestamp)
     if type(timestamp) ~= "string" then
         return nil
@@ -89,19 +90,16 @@ local function parseUtcTimestamp(timestamp)
     if not year then
         return nil
     end
-    local as_local = os.time({
-        year = tonumber(year),
-        month = tonumber(month),
-        day = tonumber(day),
-        hour = tonumber(hour),
-        min = tonumber(min),
-        sec = tonumber(sec),
-    })
-    if not as_local then
-        return nil
+    year, month, day = tonumber(year), tonumber(month), tonumber(day)
+    if month <= 2 then
+        year = year - 1
     end
-    local offset = os.time(os.date("*t", as_local)) - os.time(os.date("!*t", as_local))
-    return as_local + offset
+    local era = math.floor(year / 400)
+    local year_of_era = year - era * 400
+    local day_of_year = math.floor((153 * (month > 2 and month - 3 or month + 9) + 2) / 5) + day - 1
+    local day_of_era = year_of_era * 365 + math.floor(year_of_era / 4) - math.floor(year_of_era / 100) + day_of_year
+    local days = era * 146097 + day_of_era - 719468
+    return days * 86400 + tonumber(hour) * 3600 + tonumber(min) * 60 + tonumber(sec)
 end
 
 local function idSet(ids)
