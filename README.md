@@ -80,7 +80,7 @@ NewsBlur, CommaFeed, Miniflux, Feedbin, and Fever API accounts include special v
 - **NewsBlur**: Virtual feeds appear at the top of the root feed list (requires premium subscription for full access)
 - **CommaFeed**: Virtual feeds appear at the top of both the root feed list and inside each category/folder
 - **Miniflux**: Virtual feeds appear at the top of both the root feed list and inside each category/folder
-- **Feedbin**: Virtual feeds (★ All Feeds, ★ All Unread, ★ Starred) appear at the top of the root feed list only, since Feedbin cannot list stories by tag. Feedbin tags show up as folders, and a feed with several tags appears in each of them. Feedbin has no unread-count endpoint, so the counts in the tree come from the first 1000 unread stories; past that a feed's count shows as e.g. **(1000+)**
+- **Feedbin**: Virtual feeds (★ All Feeds, ★ All Unread, ★ Starred) appear at the top of the root feed list only, since Feedbin cannot list stories by tag. Feedbin tags show up as folders, and a feed with several tags appears in each of them. Feedbin has no unread-count endpoint, so the plugin remembers which feed each unread story belongs to and looks up at most 100 new stories each time the account opens (stories you browse are remembered too). Until it has caught up, counts are a lower bound and show as e.g. **(12+)**; with a large unread backlog that takes a few opens
 - **Fever API**: Only virtual feeds are supported (★ All Feeds, ★ All Unread). Individual feeds and folders are not shown due to API limitations.
 
 ### Settings

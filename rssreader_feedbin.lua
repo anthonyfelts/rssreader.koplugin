@@ -1,3 +1,4 @@
+local DataStorage = require("datastorage")
 local http = require("socket.http")
 local https = require("ssl.https")
 local json = require("json")
@@ -6,6 +7,7 @@ local ltn12 = require("ltn12")
 local mime = require("mime")
 local socketutil = require("socketutil")
 local url = require("socket.url")
+local util = require("util")
 
 -- Feedbin REST API v2: https://github.com/feedbin/feedbin-api
 -- Entries carry no read or starred flag; those come from the separate
@@ -17,10 +19,11 @@ local USER_AGENT = "KOReader RSSReader"
 local DEFAULT_BASE_URL = "https://api.feedbin.com"
 
 local STORIES_PER_PAGE = 50
--- Unread counts have no endpoint of their own: the tree pages through the
--- unread entries and counts them by feed, up to this many.
+-- Unread counts have no endpoint of their own, and an entry's feed only
+-- comes with the whole entry, article included. So which feed each unread
+-- entry belongs to is cached on disk, and each tree load looks up at most
+-- one page of entries it has not seen yet.
 local COUNT_PAGE_SIZE = 100
-local COUNT_MAX_PAGES = 10
 -- Most IDs unread_entries / starred_entries take per call.
 local MARK_BATCH_SIZE = 1000
 
@@ -173,6 +176,7 @@ function Feedbin:new(account)
         tree_cache = nil,
         subscriptions_cache = nil,
         feed_titles = {},
+        entry_feeds = nil,
     }
     setmetatable(instance, self)
     return instance
@@ -318,26 +322,128 @@ function Feedbin:fetchSubscriptions(force)
     return true, data
 end
 
--- Counts unread entries per feed, reading at most COUNT_MAX_PAGES pages.
--- Returns the counts and whether the cap cut the count short.
+function Feedbin:entryFeedsPath()
+    local name = tostring(self.account and self.account.name or "default"):gsub("[^%w%-_]", "_")
+    return DataStorage:getDataDir() .. "/data/rssreader_feedbin_" .. name .. ".json"
+end
+
+-- entry_feeds maps an entry ID string to its feed ID string, or to false for
+-- an entry Feedbin no longer returns, so it is not looked up again.
+function Feedbin:loadEntryFeeds()
+    if self.entry_feeds then
+        return self.entry_feeds
+    end
+    self.entry_feeds = {}
+    local file = io.open(self:entryFeedsPath(), "r")
+    if file then
+        local content = file:read("*all")
+        file:close()
+        local ok, data = pcall(json.decode, content)
+        if ok and type(data) == "table" then
+            for entry_id, feed_id in pairs(data) do
+                self.entry_feeds[tostring(entry_id)] = feed_id ~= 0 and tostring(feed_id) or false
+            end
+        end
+    end
+    return self.entry_feeds
+end
+
+function Feedbin:saveEntryFeeds()
+    if not self.entry_feeds then
+        return
+    end
+    -- Saved as 0 rather than false, which some JSON encoders drop.
+    local data = {}
+    for entry_id, feed_id in pairs(self.entry_feeds) do
+        data[entry_id] = feed_id or 0
+    end
+    local ok, encoded = pcall(json.encode, data)
+    if not ok then
+        return
+    end
+    util.makePath(DataStorage:getDataDir() .. "/data")
+    local file = io.open(self:entryFeedsPath(), "w")
+    if file then
+        file:write(encoded)
+        file:close()
+    end
+end
+
+-- Remembers the feed of entries fetched anyway, so browsing fills the cache.
+function Feedbin:rememberEntryFeeds(entries)
+    local entry_feeds = self:loadEntryFeeds()
+    local added = false
+    for _, entry in ipairs(entries) do
+        if entry.id ~= nil and entry.feed_id ~= nil then
+            local key = tostring(entry.id)
+            if entry_feeds[key] == nil then
+                entry_feeds[key] = tostring(entry.feed_id)
+                added = true
+            end
+        end
+    end
+    if added then
+        self:saveEntryFeeds()
+    end
+end
+
+-- Counts unread entries per feed from the cached entry -> feed map, after
+-- looking up the newest COUNT_PAGE_SIZE unread entries missing from it.
+-- Returns the counts and whether entries were left uncounted.
 function Feedbin:countUnreadByFeed()
-    local counts = {}
-    for page = 1, COUNT_MAX_PAGES do
-        local ok, entries = self:fetchEntriesPage("/v2/entries.json", { "read=false" }, page, COUNT_PAGE_SIZE)
-        if not ok then
+    local ok, unread_ids = self:fetchUnreadIds()
+    if not ok then
+        return false, unread_ids
+    end
+
+    local entry_feeds = self:loadEntryFeeds()
+    -- Entries that are no longer unread drop out of the cache.
+    local unread_set = idSet(unread_ids)
+    for entry_id in pairs(entry_feeds) do
+        if not unread_set[entry_id] then
+            entry_feeds[entry_id] = nil
+        end
+    end
+
+    local unknown = {}
+    for _, id in ipairs(unread_ids) do
+        if entry_feeds[tostring(id)] == nil then
+            table.insert(unknown, id)
+        end
+    end
+    -- Higher IDs are newer; look those up first.
+    table.sort(unknown, function(a, b) return a > b end)
+
+    if #unknown > 0 then
+        local batch = {}
+        for i = 1, math.min(COUNT_PAGE_SIZE, #unknown) do
+            batch[i] = tostring(unknown[i])
+        end
+        local ok_entries, entries = self:performRequest("GET", "/v2/entries.json?ids=" .. table.concat(batch, ","))
+        if not ok_entries then
             return false, entries
         end
         for _, entry in ipairs(entries) do
-            if entry.feed_id ~= nil then
-                local key = tostring(entry.feed_id)
-                counts[key] = (counts[key] or 0) + 1
+            if entry.id ~= nil and entry.feed_id ~= nil then
+                entry_feeds[tostring(entry.id)] = tostring(entry.feed_id)
             end
         end
-        if #entries < COUNT_PAGE_SIZE then
-            return true, counts, false
+        for _, id_str in ipairs(batch) do
+            if entry_feeds[id_str] == nil then
+                entry_feeds[id_str] = false
+            end
         end
     end
-    return true, counts, true
+    self:saveEntryFeeds()
+
+    local counts = {}
+    for _, id in ipairs(unread_ids) do
+        local feed_id = entry_feeds[tostring(id)]
+        if feed_id then
+            counts[feed_id] = (counts[feed_id] or 0) + 1
+        end
+    end
+    return true, counts, #unknown > COUNT_PAGE_SIZE
 end
 
 function Feedbin:buildTree(force)
@@ -514,6 +620,7 @@ function Feedbin:fetchStories(feed_id, options)
     if not ok then
         return false, entries
     end
+    self:rememberEntryFeeds(entries)
 
     local stories = {}
     for _, entry in ipairs(entries) do
