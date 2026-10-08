@@ -1615,14 +1615,17 @@ function utils.downloadStoryToCache(story, builder, on_complete, opts)
         if html_for_epub then
             page_title = html_for_epub:match([[<title[^>]*>(.-)</title>]])
             if page_title then
-                page_title = util.htmlToPlainTextIfHtml(page_title)
+                -- <title> text is always HTML-encoded (wrapHtmlForEpub escapes
+                -- it), so decode it even when it holds no tags; the IfHtml
+                -- variant left "n&#39;t" in titles and filenames.
+                page_title = util.htmlToPlainText(page_title)
             end
         end
         
         if not page_title or page_title == "" then
             page_title = content:match([[<title[^>]*>(.-)</title>]])
             if page_title then
-                page_title = util.htmlToPlainTextIfHtml(page_title)
+                page_title = util.htmlToPlainText(page_title)
             end
         end
         
