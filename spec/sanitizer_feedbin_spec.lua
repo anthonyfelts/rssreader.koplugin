@@ -45,6 +45,9 @@ T.describe("Feedbin sanitizer", function()
     T.it("treats an empty or tiny extraction as unusable", function()
         T.eq(FeedbinSanitizer.parseResponse('{"content":""}'), nil)
         T.eq(FeedbinSanitizer.parseResponse('{"content":null}'), nil)
+        -- Not JSON at all: LuaJSON aborted KOReader on these, even under pcall.
+        T.eq(FeedbinSanitizer.parseResponse("not json"), nil)
+        T.eq(FeedbinSanitizer.parseResponse("<html>Please log in</html>"), nil)
         T.falsy(FeedbinSanitizer.contentIsMeaningful("<p>Too short</p>"))
     end)
 

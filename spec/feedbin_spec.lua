@@ -73,6 +73,23 @@ T.describe("Feedbin", function()
             server:uninstall()
         end)
 
+        -- A captive portal (hotel or airport Wi-Fi login) answers with its own
+        -- HTML page. With LuaJSON this aborted KOReader even under pcall.
+        T.it("reports a reply that is not JSON as an error instead of crashing", function()
+            resetCache()
+            local server = newServer()
+            server.raw_responses["/v2/subscriptions.json"] = "<html><body>Please log in to the Wi-Fi</body></html>"
+            local ok, err = client():buildTree(true)
+            T.falsy(ok)
+            T.contains(err, "Unable to parse Feedbin response")
+            server.raw_responses["/v2/subscriptions.json"] = nil
+            server.raw_responses["/v2/feeds/1/entries.json"] = "not json"
+            local ok_stories, stories_err = client():fetchStories("1", { page = 1 })
+            T.falsy(ok_stories)
+            T.contains(stories_err, "Unable to parse Feedbin response")
+            server:uninstall()
+        end)
+
         T.it("refuses to run without credentials", function()
             local ok, err = Feedbin:new({ name = "Empty", type = "feedbin", auth = {} }):buildTree(true)
             T.falsy(ok)
@@ -160,6 +177,18 @@ T.describe("Feedbin", function()
             server:clearRequests()
             client():buildTree(true)
             T.eq(#server:requestsMatching("GET", "/v2/entries.json"), 0, "no lookups once the cache has caught up")
+            server:uninstall()
+        end)
+
+        T.it("ignores a corrupted cache file and rebuilds the counts", function()
+            resetCache()
+            local server = newServer()
+            local file = assert(io.open(client():entryFeedsPath(), "w"))
+            file:write("{ this is not json")
+            file:close()
+            local ok, tree = client():buildTree(true)
+            T.truthy(ok, tree)
+            T.eq(zetaCount(tree).unreadCount, 2)
             server:uninstall()
         end)
 

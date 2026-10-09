@@ -5,6 +5,7 @@ local json = require("json")
 local logger = require("logger")
 local ltn12 = require("ltn12")
 local mime = require("mime")
+local rapidjson = require("rapidjson")
 local socketutil = require("socketutil")
 local url = require("socket.url")
 local util = require("util")
@@ -40,11 +41,16 @@ local function requestWithScheme(options)
     return http.request(options)
 end
 
+-- Replies are decoded with rapidjson, not the json module (LuaJSON): on
+-- input that is not JSON at all, such as a captive portal's HTML page,
+-- LuaJSON can abort the whole process even under pcall, while rapidjson
+-- returns nil and an error. It is also several times faster. Request bodies
+-- are still encoded with json.
 local function safe_json_decode(payload)
     if not payload or payload == "" then
         return {}
     end
-    local ok, decoded = pcall(json.decode, payload)
+    local ok, decoded = pcall(rapidjson.decode, payload)
     if ok then
         return decoded
     end
@@ -340,8 +346,8 @@ function Feedbin:loadEntryFeeds()
     if file then
         local content = file:read("*all")
         file:close()
-        local ok, data = pcall(json.decode, content)
-        if ok and type(data) == "table" then
+        local data = safe_json_decode(content)
+        if type(data) == "table" then
             for entry_id, feed_id in pairs(data) do
                 self.entry_feeds[tostring(entry_id)] = feed_id ~= 0 and tostring(feed_id) or false
             end

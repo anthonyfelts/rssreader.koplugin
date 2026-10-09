@@ -1,4 +1,4 @@
-local json = require("json")
+local rapidjson = require("rapidjson")
 local http = require("socket.http")
 local logger = require("logger")
 local socketutil = require("socketutil")
@@ -61,7 +61,9 @@ function FeedbinSanitizer.parseResponse(payload)
         return nil
     end
 
-    local ok, decoded = pcall(json.decode, payload)
+    -- rapidjson, like rssreader_feedbin.lua: LuaJSON can abort the process
+    -- on a reply that is not JSON at all, even under pcall.
+    local ok, decoded = pcall(rapidjson.decode, payload)
     if not ok or type(decoded) ~= "table" then
         logger.info("RSSReader", "Unable to decode Feedbin extraction response")
         return nil

@@ -85,11 +85,14 @@ T.describe("live Feedbin", function()
         T.truthy(ok, page)
         local url = FeedbinSanitizer.extractionUrl(page.stories[1])
         T.truthy(url, "extraction link on the story")
-        local html
-        FeedbinSanitizer.fetchArticle(url, function(payload)
+        local html, fetch_err, payload_size
+        FeedbinSanitizer.fetchArticle(url, function(payload, err)
+            fetch_err = err
+            payload_size = payload and #payload
             html = FeedbinSanitizer.parseResponse(payload)
         end)
-        T.truthy(html and #html > 0, "extracted HTML")
+        T.truthy(html and #html > 0, string.format("extracted HTML (error: %s, reply bytes: %s)",
+            tostring(fetch_err), tostring(payload_size)))
     end)
 
     T.it("marks one story read/unread and starred/unstarred, then restores it", function()
