@@ -296,4 +296,17 @@ The exported OPML file includes:
 - **External Service Sync**: When you connect NewsBlur or CommaFeed, their servers keep past items available in the list and track what you have read, so the same history and read state follows you across devices.
 - **Read/Unread Workflow**: The plugin exposes read-state toggles and other actions directly in the story list and viewer, while the default tool focuses on downloading static bundles.
 
+## Running the Tests
+The `spec/` folder holds tests for developers changing the plugin; it is not needed on your device, so leave it out when copying the plugin over. They run on KOReader's own LuaJIT, the runtime the plugin runs on, so they need a desktop KOReader install (on macOS the app from KOReader's nightly builds):
+
+```sh
+spec/run.sh            # every spec file
+spec/run.sh feedbin    # only spec files whose name contains "feedbin"
+```
+
+- **`KOREADER_DIR`** – KOReader's install folder, the one holding `luajit` and `setupkoenv.lua`. Defaults to `/Applications/KOReader.app/Contents/koreader`
+- Each spec file runs in its own process with a throwaway data folder, and never reads your `rssreader_configuration.lua`
+- The Feedbin and navigation specs talk to an in-memory Feedbin (`spec/fake_feedbin.lua`), so they need no network or account
+- **Live specs** check the backend against the real Feedbin API and only run on request: `FEEDBIN_LIVE=1 FEEDBIN_EMAIL=… FEEDBIN_PASSWORD=… spec/run.sh live`. They are read-only except for one story, which is marked read/unread and starred/unstarred and then restored
+
 Enjoy your reading!
